@@ -14,12 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package utils
 
 import (
 	crdv1 "github.com/kubernetes-csi/external-snapshotter/pkg/apis/volumesnapshot/v1beta1"
 	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"reflect"
 	"testing"
 )
@@ -37,11 +37,11 @@ func TestGetSecretReference(t *testing.T) {
 			expectRef: nil,
 		},
 		"empty err": {
-			params:    map[string]string{snapshotterSecretNameKey: "", snapshotterSecretNamespaceKey: ""},
+			params:    map[string]string{SnapshotterSecretNameKey: "", SnapshotterSecretNamespaceKey: ""},
 			expectErr: true,
 		},
 		"[deprecated] name, no namespace": {
-			params:    map[string]string{snapshotterSecretNameKey: "foo"},
+			params:    map[string]string{SnapshotterSecretNameKey: "foo"},
 			expectErr: true,
 		},
 		"namespace, no name": {
@@ -54,7 +54,7 @@ func TestGetSecretReference(t *testing.T) {
 			expectRef: &v1.SecretReference{Name: "name", Namespace: "ns"},
 		},
 		"[deprecated] simple - valid, no pvc": {
-			params:    map[string]string{snapshotterSecretNameKey: "name", snapshotterSecretNamespaceKey: "ns"},
+			params:    map[string]string{SnapshotterSecretNameKey: "name", SnapshotterSecretNamespaceKey: "ns"},
 			snapshot:  nil,
 			expectRef: &v1.SecretReference{Name: "name", Namespace: "ns"},
 		},
@@ -65,31 +65,15 @@ func TestGetSecretReference(t *testing.T) {
 			expectErr: true,
 		},
 		"[deprecated] simple - invalid namespace": {
-			params:    map[string]string{snapshotterSecretNameKey: "name", snapshotterSecretNamespaceKey: "bad ns"},
+			params:    map[string]string{SnapshotterSecretNameKey: "name", SnapshotterSecretNamespaceKey: "bad ns"},
 			snapshot:  &crdv1.VolumeSnapshot{},
-			expectRef: nil,
-			expectErr: true,
-		},
-		"template - invalid": {
-			params: map[string]string{
-				prefixedSnapshotterSecretNameKey:      "static-${volumesnapshotcontent.name}-${volumesnapshot.namespace}-${volumesnapshot.name}-${volumesnapshot.annotations['akey']}",
-				prefixedSnapshotterSecretNamespaceKey: "static-${volumesnapshotcontent.name}-${volumesnapshot.namespace}",
-			},
-			snapContentName: "snapcontentname",
-			snapshot: &crdv1.VolumeSnapshot{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "snapshotname",
-					Namespace:   "snapshotnamespace",
-					Annotations: map[string]string{"akey": "avalue"},
-				},
-			},
 			expectRef: nil,
 			expectErr: true,
 		},
 		"template - invalid namespace tokens": {
 			params: map[string]string{
-				snapshotterSecretNameKey:      "myname",
-				snapshotterSecretNamespaceKey: "mynamespace${bar}",
+				SnapshotterSecretNameKey:      "myname",
+				SnapshotterSecretNamespaceKey: "mynamespace${bar}",
 			},
 			snapshot:  &crdv1.VolumeSnapshot{},
 			expectRef: nil,
@@ -97,8 +81,8 @@ func TestGetSecretReference(t *testing.T) {
 		},
 		"template - invalid name tokens": {
 			params: map[string]string{
-				snapshotterSecretNameKey:      "myname${foo}",
-				snapshotterSecretNamespaceKey: "mynamespace",
+				SnapshotterSecretNameKey:      "myname${foo}",
+				SnapshotterSecretNamespaceKey: "mynamespace",
 			},
 			snapshot:  &crdv1.VolumeSnapshot{},
 			expectRef: nil,
@@ -108,7 +92,7 @@ func TestGetSecretReference(t *testing.T) {
 
 	for k, tc := range testcases {
 		t.Run(k, func(t *testing.T) {
-			ref, err := getSecretReference(tc.params, tc.snapContentName, tc.snapshot)
+			ref, err := GetSecretReference(tc.params, tc.snapContentName, tc.snapshot)
 			if err != nil {
 				if tc.expectErr {
 					return
@@ -155,12 +139,12 @@ func TestRemovePrefixedCSIParams(t *testing.T) {
 		{
 			name: "all known deprecated params not stripped",
 			params: map[string]string{
-				snapshotterSecretNameKey:      "csiBar",
-				snapshotterSecretNamespaceKey: "csiBar",
+				SnapshotterSecretNameKey:      "csiBar",
+				SnapshotterSecretNamespaceKey: "csiBar",
 			},
 			expectedParams: map[string]string{
-				snapshotterSecretNameKey:      "csiBar",
-				snapshotterSecretNamespaceKey: "csiBar",
+				SnapshotterSecretNameKey:      "csiBar",
+				SnapshotterSecretNamespaceKey: "csiBar",
 			},
 		},
 		{
@@ -176,7 +160,7 @@ func TestRemovePrefixedCSIParams(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Logf("test: %v", tc.name)
-		newParams, err := removePrefixedParameters(tc.params)
+		newParams, err := RemovePrefixedParameters(tc.params)
 		if err != nil {
 			if tc.expectErr {
 				continue
