@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/kubernetes-csi/csi-lib-utils/leaderelection"
 	controller "github.com/kubernetes-csi/external-snapshotter/v3/pkg/common-controller"
+	"github.com/kubernetes-csi/external-snapshotter/v3/pkg/metrics"
 
 	clientset "github.com/kubernetes-csi/external-snapshotter/client/v3/clientset/versioned"
 	snapshotscheme "github.com/kubernetes-csi/external-snapshotter/client/v3/clientset/versioned/scheme"
@@ -48,6 +50,9 @@ var (
 
 	leaderElection          = flag.Bool("leader-election", false, "Enables leader election.")
 	leaderElectionNamespace = flag.String("leader-election-namespace", "", "The namespace where the leader election resource exists. Defaults to the pod namespace if not set.")
+
+	metricsAddress = flag.String("metrics-address", "", "The TCP network address where the prometheus metrics endpoint will listen (example: `:8080`). The default is empty string, which means metrics endpoint is disabled.")
+	metricsPath    = flag.String("metrics-path", "/metrics", "The HTTP path where prometheus metrics will be exposed. Default is `/metrics`.")
 )
 
 var (
@@ -87,6 +92,25 @@ func main() {
 	factory := informers.NewSharedInformerFactory(snapClient, *resyncPeriod)
 	coreFactory := coreinformers.NewSharedInformerFactory(kubeClient, *resyncPeriod)
 
+	// Create and register metrics manager
+	metricsManager := metrics.NewMetricsManager()
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	if *metricsAddress != "" {
+		srv, err := metricsManager.StartMetricsEndpoint(*metricsPath, *metricsAddress, nil, wg)
+		if err != nil {
+			klog.Errorf("Failed to start metrics: %s", err.Error())
+			os.Exit(1)
+		}
+		defer func() {
+			err := srv.Close()
+			if err != nil {
+				klog.Errorf("fFailed to shutdown metrics server: %s", err.Error())
+			}
+		}()
+		klog.Infof("Metrics successfully started on %s, %s", *metricsAddress, *metricsPath)
+	}
+
 	// Add Snapshot types to the default Kubernetes so events can be logged for them
 	snapshotscheme.AddToScheme(scheme.Scheme)
 
@@ -99,6 +123,7 @@ func main() {
 		factory.Snapshot().V1beta1().VolumeSnapshotContents(),
 		factory.Snapshot().V1beta1().VolumeSnapshotClasses(),
 		coreFactory.Core().V1().PersistentVolumeClaims(),
+		metricsManager,
 		*resyncPeriod,
 	)
 
@@ -110,6 +135,7 @@ func main() {
 		go ctrl.Run(*threads, stopCh)
 
 		// ...until SIGINT
+		defer wg.Done()
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt)
 		<-c
