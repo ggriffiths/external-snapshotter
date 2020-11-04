@@ -1,46 +1,37 @@
 package common_controller
 
-import (
-	"fmt"
-)
-
 const (
 	createSnapshotOperationName = "CreateSnapshot"
 	snapshottingOperationName   = "Snapshotting"
 	deleteSnapshotOperationName = "DeleteSnapshot"
 
-	dynamicSnapshotType        = snapshotType("dynamic")
-	preProvisionedSnapshotType = snapshotType("pre-provisioned")
+	dynamicSnapshotType        = snapshotProvisionType("dynamic")
+	preProvisionedSnapshotType = snapshotProvisionType("pre-provisioned")
+
+	snapshotCodeSuccess            = snapshotStatusType("success")
+	snapshotCodeInvalidRequest     = snapshotStatusType("invalid-request")
+	snapshotCodeControllerError    = snapshotStatusType("controller-error")
+	snapshotCodeStorageSystemError = snapshotStatusType("storage-system-error")
 )
 
-// snapshotKind represents which kind of snapshot a metric is
-type snapshotType string
+// snapshotProvisionType represents which kind of snapshot a metric is
+type snapshotProvisionType string
+
+// snapshotStatusType represents the status code for a snapshot
+type snapshotStatusType string
 
 // SnapshotOperationStatus represents the status for a snapshot controller operation
 type SnapshotOperationStatus struct {
-	Status string
-	Error  string
+	statusCode snapshotStatusType
 }
 
 // NewSnapshotOperationStatus returns a new SnapshotOperationStatus
-func NewSnapshotOperationStatus(err error) SnapshotOperationStatus {
-	if err != nil {
-		return SnapshotOperationStatus{
-			Status: "failed",
-			Error:  err.Error(),
-		}
-	}
-
+func NewSnapshotOperationStatus(statusCode snapshotStatusType) SnapshotOperationStatus {
 	return SnapshotOperationStatus{
-		Status: "success",
+		statusCode: statusCode,
 	}
 }
 
 func (sos SnapshotOperationStatus) String() string {
-	if sos.Error != "" {
-		return fmt.Sprintf("%s: %s", sos.Status, sos.Error)
-	}
-
-	// no error, so operation was successful
-	return "success"
+	return string(sos.statusCode)
 }

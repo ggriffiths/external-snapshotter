@@ -243,15 +243,15 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 	}
 
 	// Processing delete, start operation metric
-	snapshotType := dynamicSnapshotType
+	snapshotProvisionType := dynamicSnapshotType
 	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
-		snapshotType = preProvisionedSnapshotType
+		snapshotProvisionType = preProvisionedSnapshotType
 	}
 	ctrl.metricsManager.OperationStart(metrics.Operation{
 		Name:         deleteSnapshotOperationName,
 		Driver:       driverName,
 		ResourceID:   snapshot.UID,
-		SnapshotType: string(snapshotType),
+		SnapshotType: string(snapshotProvisionType),
 	})
 
 	var contentName string
@@ -273,8 +273,8 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 			Name:         deleteSnapshotOperationName,
 			Driver:       driverName,
 			ResourceID:   snapshot.UID,
-			SnapshotType: string(snapshotType),
-		}, NewSnapshotOperationStatus(err))
+			SnapshotType: string(snapshotProvisionType),
+		}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 		return err
 	}
 	// check whether the content points back to the passed in snapshot, note that
@@ -299,8 +299,8 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 			Name:         deleteSnapshotOperationName,
 			Driver:       driverName,
 			ResourceID:   snapshot.UID,
-			SnapshotType: string(snapshotType),
-		}, NewSnapshotOperationStatus(err))
+			SnapshotType: string(snapshotProvisionType),
+		}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 	}
 	return err
 }
@@ -451,7 +451,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(preProvisionedSnapshotType),
-			}, NewSnapshotOperationStatus(err))
+			}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 			return err
 		}
 		// if no content found yet, update status and return
@@ -459,14 +459,13 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			// can not find the desired VolumeSnapshotContent from cache store
 			ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotContentMissing", "VolumeSnapshotContent is missing")
 			klog.V(4).Infof("syncUnreadySnapshot[%s]: snapshot content %q requested but not found, will try again", utils.SnapshotKey(snapshot), *snapshot.Spec.Source.VolumeSnapshotContentName)
-			err = fmt.Errorf("snapshot %s requests an non-existing content %s", utils.SnapshotKey(snapshot), *snapshot.Spec.Source.VolumeSnapshotContentName)
 			ctrl.metricsManager.RecordMetrics(metrics.Operation{
 				Name:         createSnapshotOperationName,
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(preProvisionedSnapshotType),
-			}, NewSnapshotOperationStatus(err))
-			return err
+			}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
+			return fmt.Errorf("snapshot %s requests an non-existing content %s", utils.SnapshotKey(snapshot), *snapshot.Spec.Source.VolumeSnapshotContentName)
 		}
 		// Set VolumeSnapshotRef UID
 		newContent, err := ctrl.checkandBindSnapshotContent(snapshot, content)
@@ -478,7 +477,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(preProvisionedSnapshotType),
-			}, NewSnapshotOperationStatus(err))
+			}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 			return fmt.Errorf("snapshot %s is bound, but VolumeSnapshotContent %s is not bound to the VolumeSnapshot correctly, %v", uniqueSnapshotName, content.Name, err)
 		}
 
@@ -493,7 +492,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(preProvisionedSnapshotType),
-			}, NewSnapshotOperationStatus(err))
+			}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 			return err
 		}
 
@@ -502,7 +501,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			Driver:       driverName,
 			ResourceID:   snapshot.UID,
 			SnapshotType: string(preProvisionedSnapshotType),
-		}, NewSnapshotOperationStatus(err))
+		}, NewSnapshotOperationStatus(snapshotCodeSuccess))
 		return nil
 	}
 
@@ -525,12 +524,6 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	contentObj, err := ctrl.getDynamicallyProvisionedContentFromStore(snapshot)
 	if err != nil {
 		klog.V(4).Infof("getDynamicallyProvisionedContentFromStore[%s]: error when get content for snapshot %v", uniqueSnapshotName, err)
-		ctrl.metricsManager.RecordMetrics(metrics.Operation{
-			Name:         createSnapshotOperationName,
-			Driver:       driverName,
-			ResourceID:   snapshot.UID,
-			SnapshotType: string(dynamicSnapshotType),
-		}, NewSnapshotOperationStatus(err))
 		return err
 	}
 
@@ -544,7 +537,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(dynamicSnapshotType),
-			}, NewSnapshotOperationStatus(err))
+			}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 			return err
 		}
 		newSnapshot, err := ctrl.bindandUpdateVolumeSnapshot(contentObj, snapshot)
@@ -555,7 +548,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(dynamicSnapshotType),
-			}, NewSnapshotOperationStatus(err))
+			}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 			return err
 		}
 		klog.V(5).Infof("bindandUpdateVolumeSnapshot %v", newSnapshot)
@@ -564,7 +557,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			Driver:       driverName,
 			ResourceID:   snapshot.UID,
 			SnapshotType: string(dynamicSnapshotType),
-		}, NewSnapshotOperationStatus(nil))
+		}, NewSnapshotOperationStatus(snapshotCodeSuccess))
 		return nil
 	}
 
@@ -577,18 +570,12 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			Driver:       driverName,
 			ResourceID:   snapshot.UID,
 			SnapshotType: string(dynamicSnapshotType),
-		}, NewSnapshotOperationStatus(err))
+		}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 		return err
 	}
 	var content *crdv1.VolumeSnapshotContent
 	if content, err = ctrl.createSnapshotContent(snapshot); err != nil {
 		ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotContentCreationFailed", fmt.Sprintf("Failed to create snapshot content with error %v", err))
-		ctrl.metricsManager.RecordMetrics(metrics.Operation{
-			Name:         createSnapshotOperationName,
-			Driver:       driverName,
-			ResourceID:   snapshot.UID,
-			SnapshotType: string(dynamicSnapshotType),
-		}, NewSnapshotOperationStatus(err))
 		return err
 	}
 
@@ -602,7 +589,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			Driver:       driverName,
 			ResourceID:   snapshot.UID,
 			SnapshotType: string(dynamicSnapshotType),
-		}, NewSnapshotOperationStatus(err))
+		}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 		return err
 	}
 	return nil
@@ -668,9 +655,19 @@ func (ctrl *csiSnapshotCommonController) getPreprovisionedContentFromStore(snaps
 // A content is considered to be a pre-provisioned one if its Spec.Source.SnapshotHandle
 // is not nil, or a dynamically provisioned one if its Spec.Source.VolumeHandle is not nil.
 func (ctrl *csiSnapshotCommonController) getDynamicallyProvisionedContentFromStore(snapshot *crdv1.VolumeSnapshot) (*crdv1.VolumeSnapshotContent, error) {
+	driverName, err := ctrl.getSnapshotDriverName(snapshot)
+	if err != nil {
+		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
+	}
 	contentName := utils.GetDynamicSnapshotContentNameForSnapshot(snapshot)
 	content, err := ctrl.getContentFromStore(contentName)
 	if err != nil {
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 		return nil, err
 	}
 	if content == nil {
@@ -681,6 +678,12 @@ func (ctrl *csiSnapshotCommonController) getDynamicallyProvisionedContentFromSto
 	if content.Spec.Source.VolumeHandle == nil {
 		ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotContentMismatch", "VolumeSnapshotContent "+contentName+" is pre-provisioned while expecting a dynamically provisioned one")
 		klog.V(4).Infof("sync snapshot[%s]: snapshot content %s is pre-provisioned while expecting a dynamically provisioned one", utils.SnapshotKey(snapshot), contentName)
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 		return nil, fmt.Errorf("snapshot %s expects a dynamically provisioned VolumeSnapshotContent %s but gets a pre-provisioned one", utils.SnapshotKey(snapshot), contentName)
 	}
 	// check whether the content points back to the passed in VolumeSnapshot
@@ -693,6 +696,12 @@ func (ctrl *csiSnapshotCommonController) getDynamicallyProvisionedContentFromSto
 		klog.V(4).Infof("sync snapshot[%s]: VolumeSnapshotContent %s is bound to another snapshot %v", utils.SnapshotKey(snapshot), contentName, ref)
 		msg := fmt.Sprintf("VolumeSnapshotContent [%s] is bound to a different snapshot", contentName)
 		ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotContentMisbound", msg)
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 		return nil, fmt.Errorf(msg)
 	}
 	return content, nil
@@ -723,10 +732,14 @@ func (ctrl *csiSnapshotCommonController) getContentFromStore(contentName string)
 // createSnapshotContent will only be called for dynamic provisioning
 func (ctrl *csiSnapshotCommonController) createSnapshotContent(snapshot *crdv1.VolumeSnapshot) (*crdv1.VolumeSnapshotContent, error) {
 	klog.Infof("createSnapshotContent: Creating content for snapshot %s through the plugin ...", utils.SnapshotKey(snapshot))
+	driverName, err := ctrl.getSnapshotDriverName(snapshot)
+	if err != nil {
+		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
+	}
 
 	// If PVC is not being deleted and finalizer is not added yet, a finalizer should be added to PVC until snapshot is created
 	klog.V(5).Infof("createSnapshotContent: Check if PVC is not being deleted and add Finalizer for source of snapshot [%s] if needed", snapshot.Name)
-	err := ctrl.ensurePVCFinalizer(snapshot)
+	err = ctrl.ensurePVCFinalizer(snapshot)
 	if err != nil {
 		klog.Errorf("createSnapshotContent failed to add finalizer for source of snapshot %s", err)
 		return nil, err
@@ -734,11 +747,23 @@ func (ctrl *csiSnapshotCommonController) createSnapshotContent(snapshot *crdv1.V
 
 	class, volume, contentName, snapshotterSecretRef, err := ctrl.getCreateSnapshotInput(snapshot)
 	if err != nil {
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 		return nil, fmt.Errorf("failed to get input parameters to create snapshot %s: %q", snapshot.Name, err)
 	}
 
 	// Create VolumeSnapshotContent in the database
 	if volume.Spec.CSI == nil {
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeInvalidRequest))
 		return nil, fmt.Errorf("cannot find CSI PersistentVolumeSource for volume %s", volume.Name)
 	}
 	snapshotRef, err := ref.GetReference(scheme.Scheme, snapshot)
@@ -789,6 +814,12 @@ func (ctrl *csiSnapshotCommonController) createSnapshotContent(snapshot *crdv1.V
 		strerr := fmt.Sprintf("Error creating volume snapshot content object for snapshot %s: %v.", utils.SnapshotKey(snapshot), err)
 		klog.Error(strerr)
 		ctrl.eventRecorder.Event(snapshot, v1.EventTypeWarning, "CreateSnapshotContentFailed", strerr)
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 		return nil, newControllerUpdateError(utils.SnapshotKey(snapshot), err.Error())
 	}
 
@@ -798,6 +829,12 @@ func (ctrl *csiSnapshotCommonController) createSnapshotContent(snapshot *crdv1.V
 	// Update content in the cache store
 	_, err = ctrl.storeContentUpdate(updateContent)
 	if err != nil {
+		ctrl.metricsManager.RecordMetrics(metrics.Operation{
+			Name:         createSnapshotOperationName,
+			Driver:       driverName,
+			ResourceID:   snapshot.UID,
+			SnapshotType: string(dynamicSnapshotType),
+		}, NewSnapshotOperationStatus(snapshotCodeControllerError))
 		klog.Errorf("failed to update content store %v", err)
 	}
 
@@ -1250,7 +1287,7 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(dynamicSnapshotType),
-			}, NewSnapshotOperationStatus(nil))
+			}, NewSnapshotOperationStatus(snapshotCodeSuccess))
 		}
 
 		// Must meet the following criteria to emit a successful CreateSnapshot status
@@ -1263,7 +1300,7 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 				Driver:       driverName,
 				ResourceID:   snapshot.UID,
 				SnapshotType: string(dynamicSnapshotType),
-			}, NewSnapshotOperationStatus(nil))
+			}, NewSnapshotOperationStatus(snapshotCodeSuccess))
 		}
 
 		return newSnapshotObj, nil
