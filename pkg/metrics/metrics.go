@@ -100,9 +100,6 @@ type operationMetricsManager struct {
 
 	// opLatencyMetrics is a Histogram metrics
 	opLatencyMetrics *k8smetrics.HistogramVec
-
-	// opCountMetrics is a Counter metrics
-	opCountMetrics *k8smetrics.CounterVec
 }
 
 func NewMetricsManager() MetricsManager {
@@ -139,8 +136,7 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 		strStatus = status.String()
 	}
 	duration := time.Since(ts).Seconds()
-	opMgr.opLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType).Observe(duration)
-	opMgr.opCountMetrics.WithLabelValues(op.Driver, op.Name, strStatus).Inc()
+	opMgr.opLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(duration)
 	opMgr.cache.Delete(op)
 }
 
@@ -153,18 +149,9 @@ func (opMgr *operationMetricsManager) init() {
 			Help:      latencyMetricHelpMsg,
 			Buckets:   metricBuckets,
 		},
-		[]string{labelDriverName, labelOperationName, labelSnapshotType},
-	)
-	opMgr.opCountMetrics = k8smetrics.NewCounterVec(
-		&k8smetrics.CounterOpts{
-			Subsystem: subSystem,
-			Name:      countMetricName,
-			Help:      countMetricHelpMsg,
-		},
-		[]string{labelDriverName, labelOperationName, labelOperationStatus},
+		[]string{labelDriverName, labelOperationName, labelSnapshotType, labelOperationStatus},
 	)
 	opMgr.registry.MustRegister(opMgr.opLatencyMetrics)
-	opMgr.registry.MustRegister(opMgr.opCountMetrics)
 }
 
 func (opMgr *operationMetricsManager) StartMetricsEndpoint(pattern, addr string, logger promhttp.Logger, wg *sync.WaitGroup) (*http.Server, error) {

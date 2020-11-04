@@ -411,9 +411,23 @@ func (ctrl *csiSnapshotCommonController) updateContent(content *crdv1.VolumeSnap
 
 // deleteSnapshot runs in worker thread and handles "snapshot deleted" event.
 func (ctrl *csiSnapshotCommonController) deleteSnapshot(snapshot *crdv1.VolumeSnapshot) {
+	driverName, err := ctrl.getSnapshotDriverName(snapshot)
+	if err != nil {
+		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
+	}
+	snapshotType := dynamicSnapshotType
+	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
+		snapshotType = preProvisionedSnapshotType
+	}
+
 	_ = ctrl.snapshotStore.Delete(snapshot)
 	klog.V(4).Infof("snapshot %q deleted", utils.SnapshotKey(snapshot))
-	ctrl.RecordSnapshotMetrics(snapshot, deleteSnapshotOperationName, "", nil)
+	ctrl.metricsManager.RecordMetrics(metrics.Operation{
+		Name:         deleteSnapshotOperationName,
+		Driver:       driverName,
+		ResourceID:   snapshot.UID,
+		SnapshotType: string(snapshotType),
+	}, NewSnapshotOperationStatus(nil))
 
 	snapshotContentName := ""
 	if snapshot.Status != nil && snapshot.Status.BoundVolumeSnapshotContentName != nil {

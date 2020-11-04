@@ -97,16 +97,17 @@ func main() {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	if *metricsAddress != "" {
-		srv, err := metricsManager.StartMetricsEndpoint(*metricsPath, *metricsAddress, nil, wg)
+		srv, err := metricsManager.StartMetricsEndpoint(*metricsPath, *metricsAddress, promklog{}, wg)
 		if err != nil {
 			klog.Errorf("Failed to start metrics: %s", err.Error())
 			os.Exit(1)
 		}
 		defer func() {
-			err := srv.Close()
+			err := srv.Shutdown(context.Background())
 			if err != nil {
-				klog.Errorf("fFailed to shutdown metrics server: %s", err.Error())
+				klog.Errorf("Failed to shutdown metrics server: %s", err.Error())
 			}
+			wg.Done()
 		}()
 		klog.Infof("Metrics successfully started on %s, %s", *metricsAddress, *metricsPath)
 	}
@@ -135,7 +136,6 @@ func main() {
 		go ctrl.Run(*threads, stopCh)
 
 		// ...until SIGINT
-		defer wg.Done()
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt)
 		<-c
@@ -167,4 +167,10 @@ func buildConfig(kubeconfig string) (*rest.Config, error) {
 		return clientcmd.BuildConfigFromFlags("", kubeconfig)
 	}
 	return rest.InClusterConfig()
+}
+
+type promklog struct{}
+
+func (pl promklog) Println(v ...interface{}) {
+	klog.Error(v...)
 }
