@@ -24,13 +24,16 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kubernetes-csi/external-snapshotter/client/v3/apis/volumesnapshot/v1beta1"
 	cmg "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -104,7 +107,11 @@ func TestRecordMetricsForNonExistingOperation(t *testing.T) {
 		Driver:     "driver",
 		ResourceID: types.UID("uid"),
 	}
-	mgr.RecordMetrics(op, nil)
+	mgr.RecordMetrics(op, nil, &v1beta1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+		},
+	})
 	rsp, err := http.Get(srvAddr)
 	if err != nil || rsp.StatusCode != http.StatusOK {
 		t.Errorf("failed to get response from server %v, %v", err, rsp)
@@ -148,7 +155,11 @@ func TestDropOperation(t *testing.T) {
 	opStatus := &fakeOpStatus{
 		statusCode: 0,
 	}
-	mgr.RecordMetrics(op, opStatus)
+	mgr.RecordMetrics(op, opStatus, &v1beta1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+		},
+	})
 	expected :=
 		`# HELP snapshot_controller_operation_total_seconds [ALPHA] Total number of seconds spent by the controller on an operation from end to end
 # TYPE snapshot_controller_operation_total_seconds histogram
@@ -187,7 +198,11 @@ func TestUnknownStatus(t *testing.T) {
 	mgr.OperationStart(op)
 	// should create a Unknown data point with latency ~300ms
 	time.Sleep(300 * time.Millisecond)
-	mgr.RecordMetrics(op, nil)
+	mgr.RecordMetrics(op, nil, &v1beta1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+		},
+	})
 	expected :=
 		`# HELP snapshot_controller_operation_total_seconds [ALPHA] Total number of seconds spent by the controller on an operation from end to end
 # TYPE snapshot_controller_operation_total_seconds histogram
@@ -230,7 +245,11 @@ func TestRecordMetrics(t *testing.T) {
 	success := &fakeOpStatus{
 		statusCode: 0,
 	}
-	mgr.RecordMetrics(op, success)
+	mgr.RecordMetrics(op, success, &v1beta1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+		},
+	})
 
 	// add another operation metric
 	op.Name = "op2"
@@ -242,7 +261,11 @@ func TestRecordMetrics(t *testing.T) {
 	failure := &fakeOpStatus{
 		statusCode: 1,
 	}
-	mgr.RecordMetrics(op, failure)
+	mgr.RecordMetrics(op, failure, &v1beta1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			CreationTimestamp: metav1.Now(),
+		},
+	})
 
 	expected :=
 		`# HELP snapshot_controller_operation_total_seconds [ALPHA] Total number of seconds spent by the controller on an operation from end to end
@@ -386,7 +409,11 @@ func TestConcurrency(t *testing.T) {
 			if ops[i].drop {
 				mgr.DropOperation(ops[i].op)
 			} else {
-				mgr.RecordMetrics(ops[i].op, ops[i].status)
+				mgr.RecordMetrics(ops[i].op, ops[i].status, &v1beta1.VolumeSnapshot{
+					ObjectMeta: metav1.ObjectMeta{
+						CreationTimestamp: metav1.Now(),
+					},
+				})
 			}
 		}(i)
 	}
@@ -529,16 +556,16 @@ func verifyMetric(expected, srvAddr string) error {
 // currently only supports counter and histogram
 func sortMfs(mfs []*cmg.MetricFamily) []*cmg.MetricFamily {
 	var sortedMfs []*cmg.MetricFamily
-	for _, mf := range mfs {
-		if mf.Type != nil && *mf.Type == cmg.MetricType_COUNTER {
-			sortedMfs = append(sortedMfs, mf)
-		}
-	}
-	for _, mf := range mfs {
-		if mf.Type != nil && *mf.Type == cmg.MetricType_HISTOGRAM {
-			sortedMfs = append(sortedMfs, mf)
-		}
-	}
+
+	// Sort first by type
+	sort.Slice(mfs, func(i, j int) bool {
+		return *mfs[i].Type < *mfs[j].Type
+	})
+
+	// Next, sort by length of name
+	sort.Slice(mfs, func(i, j int) bool {
+		return len(*mfs[i].Name) < len(*mfs[j].Name)
+	})
 
 	return sortedMfs
 }

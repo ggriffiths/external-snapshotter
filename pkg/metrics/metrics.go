@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	crdv1 "github.com/kubernetes-csi/external-snapshotter/client/v3/apis/volumesnapshot/v1beta1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/types"
 	k8smetrics "k8s.io/component-base/metrics"
@@ -30,16 +31,30 @@ import (
 )
 
 const (
-	opStatusUnknown      = "Unknown"
-	labelDriverName      = "driver_name"
-	labelOperationName   = "operation_name"
-	labelOperationStatus = "operation_status"
-	labelSnapshotType    = "snapshot_type"
-	subSystem            = "snapshot_controller"
-	latencyMetricName    = "operation_total_seconds"
-	latencyMetricHelpMsg = "Total number of seconds spent by the controller on an operation from end to end"
-	countMetricName      = "operation_count"
-	countMetricHelpMsg   = "Total number of operations performed by the controller and the corresponding status"
+	StatusUnknown                      = "Unknown"
+	labelDriverName                    = "driver_name"
+	labelOperationName                 = "operation_name"
+	labelOperationStatus               = "operation_status"
+	labelSnapshotType                  = "snapshot_type"
+	subSystem                          = "snapshot_controller"
+	latencyReconciliationMetricName    = "reconciliation_total_seconds"
+	latencyReconciliationMetricHelpMsg = "Number of seconds spent by the controller on intermediate reconciliations"
+	latencyOperationMetricName         = "operation_total_seconds"
+	latencyOperationMetricHelpMsg      = "Total number of seconds spent by the controller on an operation"
+
+	CreateSnapshotOperationName         = "CreateSnapshot"
+	CreateSnapshotAndReadyOperationName = "CreateSnapshotAndReady"
+	DeleteSnapshotOperationName         = "DeleteSnapshot"
+
+	DynamicSnapshotType        = snapshotProvisionType("dynamic")
+	PreProvisionedSnapshotType = snapshotProvisionType("pre-provisioned")
+
+	SnapshotStatusTypeUnknown            = snapshotStatusType("unknown")
+	SnapshotStatusTypeSuccess            = snapshotStatusType("success")
+	SnapshotStatusTypeInvalidRequest     = snapshotStatusType("invalid-request")
+	SnapshotStatusTypeControllerError    = snapshotStatusType("controller-error")
+	SnapshotStatusTypeStorageSystemError = snapshotStatusType("storage-system-error")
+	SnapshotStatusTypeCancel             = snapshotStatusType("cancel")
 )
 
 // OperationStatus is the interface type for representing an operation's execution
@@ -72,20 +87,35 @@ type MetricsManager interface {
 	// op - the operation which the metric is associated with.
 	// status - the operation status, if not specified, i.e., status == nil, an
 	//          "Unknown" status of the passed-in operation is assumed.
-	RecordMetrics(op Operation, status OperationStatus)
+	RecordMetrics(op Operation, status OperationStatus, volumeSnapshot *crdv1.VolumeSnapshot)
 }
 
 // Operation is a structure which holds information to identify a snapshot
 // related operation
 type Operation struct {
-	// the name of the operation, for example: "CreateSnapshot", "DeleteSnapshot"
+	// Name is the name of the operation, for example: "CreateSnapshot", "DeleteSnapshot"
 	Name string
-	// the name of the driver which executes the operation
+	// Driver is the driver name which executes the operation
 	Driver string
-	// the resource UID to which the operation has been executed against
+	// ResourceID is the resource UID to which the operation has been executed against
 	ResourceID types.UID
-	// Type represents the snapshot type, for example: "dynamic", "pre-provisioned"
+	// SnapshotType represents the snapshot type, for example: "dynamic", "pre-provisioned"
 	SnapshotType string
+}
+
+// NewOperation initializes a new Operation
+func NewOperation(name, driver string, snapshot *crdv1.VolumeSnapshot) Operation {
+	snapshotProvisionType := DynamicSnapshotType
+	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
+		snapshotProvisionType = PreProvisionedSnapshotType
+	}
+
+	return Operation{
+		Name:         name,
+		Driver:       driver,
+		ResourceID:   snapshot.UID,
+		SnapshotType: string(snapshotProvisionType),
+	}
 }
 
 type operationMetricsManager struct {
@@ -98,10 +128,14 @@ type operationMetricsManager struct {
 	// registry is a wrapper around Prometheus Registry
 	registry k8smetrics.KubeRegistry
 
-	// opLatencyMetrics is a Histogram metrics
-	opLatencyMetrics *k8smetrics.HistogramVec
+	// opReconciliationLatencyMetrics is a Histogram metric for invidual reconciliation metrics
+	opReconciliationLatencyMetrics *k8smetrics.HistogramVec
+
+	// opRequestLatencyMetrics is a Histogram metrics for e2e operation time per request
+	opRequestLatencyMetrics *k8smetrics.HistogramVec
 }
 
+// NewMetricsManager creates a new MetricsManager instance
 func NewMetricsManager() MetricsManager {
 	mgr := &operationMetricsManager{
 		cache: sync.Map{},
@@ -110,15 +144,18 @@ func NewMetricsManager() MetricsManager {
 	return mgr
 }
 
+// OperationStart starts a new operation
 func (opMgr *operationMetricsManager) OperationStart(op Operation) {
 	opMgr.cache.LoadOrStore(op, time.Now())
 }
 
+// OperationStart drops an operation
 func (opMgr *operationMetricsManager) DropOperation(op Operation) {
 	opMgr.cache.Delete(op)
 }
 
-func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status OperationStatus) {
+// RecordMetrics emits operation metrics
+func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status OperationStatus, snapshot *crdv1.VolumeSnapshot) {
 	obj, exists := opMgr.cache.Load(op)
 	if !exists {
 		// the operation has not been cached, return directly
@@ -131,27 +168,71 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 		opMgr.cache.Delete(op)
 		return
 	}
-	strStatus := opStatusUnknown
+	strStatus := string(SnapshotStatusTypeUnknown)
 	if status != nil {
 		strStatus = status.String()
 	}
-	duration := time.Since(ts).Seconds()
-	opMgr.opLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(duration)
+
+	// record invidual reconciliation time
+	reconciliationDuration := time.Since(ts).Seconds()
+	opMgr.opReconciliationLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(reconciliationDuration)
+
+	// record total operation durations if operation is successful
+	if strStatus == string(SnapshotStatusTypeSuccess) {
+		switch op.Name {
+		case CreateSnapshotAndReadyOperationName:
+			// time since user first created volumesnapshot
+			operationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
+			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
+
+		case DeleteSnapshotOperationName:
+			// check if this is a cancellation. It is a cancellation if the snapshot deletion finished without a status set
+			// or there is a status set with ReadyToUse set to false.
+			if snapshot.Status == nil || (snapshot.Status.ReadyToUse != nil && !(*snapshot.Status.ReadyToUse)) {
+				// get duration from creation time to delete/cancellation
+				cancelOperationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
+
+				// emit this metric as a custom cancellation
+				opMgr.opRequestLatencyMetrics.WithLabelValues(
+					op.Driver,
+					CreateSnapshotAndReadyOperationName,
+					op.SnapshotType,
+					string(SnapshotStatusTypeCancel),
+				).Observe(cancelOperationDuration)
+			}
+
+			// Still emit the delete operation, as we are both deleting the snapshot and cancelling it's creation.
+			// For this duration, we use the time since user marked volumesnapshot for deletion.
+			operationDuration := time.Since(snapshot.DeletionTimestamp.Time).Seconds()
+			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
+		}
+	}
+
 	opMgr.cache.Delete(op)
 }
 
 func (opMgr *operationMetricsManager) init() {
 	opMgr.registry = k8smetrics.NewKubeRegistry()
-	opMgr.opLatencyMetrics = k8smetrics.NewHistogramVec(
+	opMgr.opReconciliationLatencyMetrics = k8smetrics.NewHistogramVec(
 		&k8smetrics.HistogramOpts{
 			Subsystem: subSystem,
-			Name:      latencyMetricName,
-			Help:      latencyMetricHelpMsg,
+			Name:      latencyReconciliationMetricName,
+			Help:      latencyReconciliationMetricHelpMsg,
 			Buckets:   metricBuckets,
 		},
 		[]string{labelDriverName, labelOperationName, labelSnapshotType, labelOperationStatus},
 	)
-	opMgr.registry.MustRegister(opMgr.opLatencyMetrics)
+	opMgr.opRequestLatencyMetrics = k8smetrics.NewHistogramVec(
+		&k8smetrics.HistogramOpts{
+			Subsystem: subSystem,
+			Name:      latencyOperationMetricName,
+			Help:      latencyOperationMetricHelpMsg,
+			Buckets:   metricBuckets,
+		},
+		[]string{labelDriverName, labelOperationName, labelSnapshotType, labelOperationStatus},
+	)
+	opMgr.registry.MustRegister(opMgr.opReconciliationLatencyMetrics)
+	opMgr.registry.MustRegister(opMgr.opRequestLatencyMetrics)
 }
 
 func (opMgr *operationMetricsManager) StartMetricsEndpoint(pattern, addr string, logger promhttp.Logger, wg *sync.WaitGroup) (*http.Server, error) {
@@ -179,4 +260,26 @@ func (opMgr *operationMetricsManager) StartMetricsEndpoint(pattern, addr string,
 		}
 	}()
 	return srv, nil
+}
+
+// snapshotProvisionType represents which kind of snapshot a metric is
+type snapshotProvisionType string
+
+// snapshotStatusType represents the type of snapshot status to report
+type snapshotStatusType string
+
+// SnapshotOperationStatus represents the status for a snapshot controller operation
+type SnapshotOperationStatus struct {
+	statusCode snapshotStatusType
+}
+
+// NewSnapshotOperationStatus returns a new SnapshotOperationStatus
+func NewSnapshotOperationStatus(statusCode snapshotStatusType) SnapshotOperationStatus {
+	return SnapshotOperationStatus{
+		statusCode: statusCode,
+	}
+}
+
+func (sos SnapshotOperationStatus) String() string {
+	return string(sos.statusCode)
 }

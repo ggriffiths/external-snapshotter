@@ -415,19 +415,11 @@ func (ctrl *csiSnapshotCommonController) deleteSnapshot(snapshot *crdv1.VolumeSn
 	if err != nil {
 		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
 	}
-	snapshotProvisionType := dynamicSnapshotType
-	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
-		snapshotProvisionType = preProvisionedSnapshotType
-	}
 
 	_ = ctrl.snapshotStore.Delete(snapshot)
 	klog.V(4).Infof("snapshot %q deleted", utils.SnapshotKey(snapshot))
-	ctrl.metricsManager.RecordMetrics(metrics.Operation{
-		Name:         deleteSnapshotOperationName,
-		Driver:       driverName,
-		ResourceID:   snapshot.UID,
-		SnapshotType: string(snapshotProvisionType),
-	}, NewSnapshotOperationStatus(snapshotStatusTypeSuccess))
+	deleteOperation := metrics.NewOperation(metrics.DeleteSnapshotOperationName, driverName, snapshot)
+	ctrl.metricsManager.RecordMetrics(deleteOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), snapshot)
 
 	snapshotContentName := ""
 	if snapshot.Status != nil && snapshot.Status.BoundVolumeSnapshotContentName != nil {
