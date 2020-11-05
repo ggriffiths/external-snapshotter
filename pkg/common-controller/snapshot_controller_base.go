@@ -427,7 +427,7 @@ func (ctrl *csiSnapshotCommonController) deleteSnapshot(snapshot *crdv1.VolumeSn
 		Driver:       driverName,
 		ResourceID:   snapshot.UID,
 		SnapshotType: string(snapshotProvisionType),
-	}, NewSnapshotOperationStatus(snapshotCodeSuccess))
+	}, NewSnapshotOperationStatus(snapshotStatusTypeSuccess))
 
 	snapshotContentName := ""
 	if snapshot.Status != nil && snapshot.Status.BoundVolumeSnapshotContentName != nil {
