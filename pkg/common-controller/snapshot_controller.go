@@ -239,7 +239,7 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 	klog.V(5).Infof("processSnapshotWithDeletionTimestamp VolumeSnapshot[%s]: %s", utils.SnapshotKey(snapshot), utils.GetSnapshotStatusForLogging(snapshot))
 	driverName, err := ctrl.getSnapshotDriverName(snapshot)
 	if err != nil {
-		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
+		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %v", utils.SnapshotKey(snapshot), err)
 	}
 
 	// Processing delete, start operation metric
@@ -463,6 +463,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 		return nil
 	}
 
+	// snapshot.Spec.Source.VolumeSnapshotContentName == nil - dynamically creating snapshot
 	createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
 	ctrl.metricsManager.OperationStart(createOperation)
 
@@ -1193,7 +1194,7 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 			return nil, newControllerUpdateError(utils.SnapshotKey(snapshot), err.Error())
 		}
 
-		// Must meet the following criteria to emit a successful snapshotting status
+		// Must meet the following criteria to emit a successful CreateSnapshot status
 		// 1. Previous status was nil OR Previous status had a nil CreationTime
 		// 2. New status must be non-nil with a non-nil CreationTime
 		if (snapshotObj.Status == nil || (snapshotObj.Status != nil && snapshotObj.Status.CreationTime == nil)) &&
@@ -1201,7 +1202,7 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 			ctrl.metricsManager.RecordMetrics(createOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), newSnapshotObj)
 		}
 
-		// Must meet the following criteria to emit a successful CreateSnapshot status
+		// Must meet the following criteria to emit a successful CreateSnapshotAndReady status
 		// 1. Previous status was nil OR Previous status had a nil ReadyToUse
 		// 2. New status must be non-nil with a ReadyToUse as true
 		if (snapshotObj.Status == nil || (snapshotObj.Status != nil && snapshotObj.Status.ReadyToUse == nil)) &&
