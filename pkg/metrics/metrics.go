@@ -42,19 +42,19 @@ const (
 	latencyOperationMetricHelpMsg      = "Total number of seconds spent by the controller on an operation from end to end"
 
 	// CreateSnapshotOperationName is the operation that tracks how long the controller takes to create a snapshot.
-	// Specifically, the operation metric is emitted based on the following timestamps:
+	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
 	// - Start_time: controller notices the first time that there is a new VolumeSnapshot CR to dynamically provision a snapshot
 	// - End_time:   controller notices that the CR has a status with CreationTime field set to be non-nil OR an error occurs first
 	CreateSnapshotOperationName = "CreateSnapshot"
 
 	// CreateSnapshotAndReadyOperationName is the operation that tracks how long the controller takes to create a snapshot and for it to be ready.
-	// Specifically, the operation metric is emitted based on the following timestamps:
+	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
 	// - Start_time: controller notices the first time that there is a new VolumeSnapshot CR(both dynamic and pre-provisioned cases)
 	// - End_time:   controller notices that the CR has a status with Ready field set to be true OR an error occurs first
 	CreateSnapshotAndReadyOperationName = "CreateSnapshotAndReady"
 
 	// DeleteSnapshotOperationName is the operation that tracks how long a snapshot deletion takes.
-	// Specifically, the operation metric is emitted based on the following timestamps:
+	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
 	// - Start_time: controller notices the first time that there is a deletion timestamp placed on the VolumeSnapshot CR and the CR is ready to be deleted. Note that if the CR is being used by a PVC for rehydration, the controller should *NOT* set the start_time.
 	// - End_time: controller removed all finalizers on the VolumeSnapshot CR such that the CR is ready to be removed in the API server.
 	DeleteSnapshotOperationName = "DeleteSnapshot"
