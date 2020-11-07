@@ -245,13 +245,9 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 	// Processing delete, start operation metric
 	deleteOperation := metrics.NewOperation(metrics.DeleteSnapshotOperationName, driverName, snapshot)
 	ctrl.metricsManager.OperationStart(deleteOperation)
-	snapshotStatusType := metrics.SnapshotStatusTypeControllerError
+	snapshotStatusType := metrics.SnapshotStatusTypeInProgress
 	defer func() {
-		if err != nil {
-			// only emit if there is an error.
-			// success for deleteOperation is emitted elsewhere.
-			ctrl.metricsManager.RecordMetrics(deleteOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
-		}
+		ctrl.metricsManager.RecordMetrics(deleteOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
 	}()
 
 	var contentName string
@@ -269,6 +265,7 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 	// content has been found from content cache store
 	content, err := ctrl.getContentFromStore(contentName)
 	if err != nil {
+		snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 		return err
 	}
 	// check whether the content points back to the passed in snapshot, note that
@@ -287,7 +284,12 @@ func (ctrl *csiSnapshotCommonController) processSnapshotWithDeletionTimestamp(sn
 	}
 
 	klog.V(5).Infof("processSnapshotWithDeletionTimestamp[%s]: delete snapshot content and remove finalizer from snapshot if needed", utils.SnapshotKey(snapshot))
-	return ctrl.checkandRemoveSnapshotFinalizersAndCheckandDeleteContent(snapshot, content, deleteContent)
+
+	err = ctrl.checkandRemoveSnapshotFinalizersAndCheckandDeleteContent(snapshot, content, deleteContent)
+	if err != nil {
+		snapshotStatusType = metrics.SnapshotStatusTypeControllerError
+	}
+	return err
 }
 
 // checkandRemoveSnapshotFinalizersAndCheckandDeleteContent deletes the content and removes snapshot finalizers (VolumeSnapshotAsSourceFinalizer and VolumeSnapshotBoundFinalizer) if needed
@@ -419,12 +421,12 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	if err != nil {
 		klog.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
 	}
+	snapshotStatusType := metrics.SnapshotStatusTypeInProgress
 
 	// Pre-provisioned snapshot
 	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
 		createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
 		ctrl.metricsManager.OperationStart(createAndReadyOperation)
-		snapshotStatusType := metrics.SnapshotStatusTypeControllerError
 		defer func() {
 			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
 		}()
@@ -440,6 +442,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotContentMissing", "VolumeSnapshotContent is missing")
 			klog.V(4).Infof("syncUnreadySnapshot[%s]: snapshot content %q requested but not found, will try again", utils.SnapshotKey(snapshot), *snapshot.Spec.Source.VolumeSnapshotContentName)
 
+			snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 			return fmt.Errorf("snapshot %s requests an non-existing content %s", utils.SnapshotKey(snapshot), *snapshot.Spec.Source.VolumeSnapshotContentName)
 		}
 		// Set VolumeSnapshotRef UID
@@ -447,6 +450,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 		if err != nil {
 			// snapshot is bound but content is not bound to snapshot correctly
 			ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotBindFailed", fmt.Sprintf("Snapshot failed to bind VolumeSnapshotContent, %v", err))
+			snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 			return fmt.Errorf("snapshot %s is bound, but VolumeSnapshotContent %s is not bound to the VolumeSnapshot correctly, %v", uniqueSnapshotName, content.Name, err)
 		}
 
@@ -456,6 +460,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			// update snapshot status failed
 			klog.V(4).Infof("failed to update snapshot %s status: %v", utils.SnapshotKey(snapshot), err)
 			ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotStatusUpdateFailed", fmt.Sprintf("Snapshot status update failed, %v", err))
+			snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 			return err
 		}
 
@@ -466,22 +471,21 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	// snapshot.Spec.Source.VolumeSnapshotContentName == nil - dynamically creating snapshot
 	createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
 	ctrl.metricsManager.OperationStart(createOperation)
+	defer func() {
+		ctrl.metricsManager.RecordMetrics(createOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
+	}()
 
 	createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
 	ctrl.metricsManager.OperationStart(createAndReadyOperation)
-	snapshotStatusType := metrics.SnapshotStatusTypeControllerError
 	defer func() {
-		if err != nil {
-			// only emit if there is an error.
-			// success for createAndReadyOperation is emitted elsewhere.
-			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
-		}
+		ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
 	}()
 
 	klog.V(5).Infof("getDynamicallyProvisionedContentFromStore for snapshot %s", uniqueSnapshotName)
 	contentObj, err := ctrl.getDynamicallyProvisionedContentFromStore(snapshot)
 	if err != nil {
 		klog.V(4).Infof("getDynamicallyProvisionedContentFromStore[%s]: error when get content for snapshot %v", uniqueSnapshotName, err)
+		snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 		return err
 	}
 
@@ -496,6 +500,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 		newSnapshot, err := ctrl.bindandUpdateVolumeSnapshot(contentObj, snapshot)
 		if err != nil {
 			klog.V(4).Infof("bindandUpdateVolumeSnapshot[%s]: failed to bind content [%s] to snapshot %v", uniqueSnapshotName, contentObj.Name, err)
+			snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 			return err
 		}
 		klog.V(5).Infof("bindandUpdateVolumeSnapshot %v", newSnapshot)
@@ -512,6 +517,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	var content *crdv1.VolumeSnapshotContent
 	if content, err = ctrl.createSnapshotContent(snapshot); err != nil {
 		ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotContentCreationFailed", fmt.Sprintf("Failed to create snapshot content with error %v", err))
+		snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 		return err
 	}
 
@@ -520,6 +526,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	if _, err = ctrl.updateSnapshotStatus(snapshot, content); err != nil {
 		// update snapshot status failed
 		ctrl.updateSnapshotErrorStatusWithEvent(snapshot, v1.EventTypeWarning, "SnapshotStatusUpdateFailed", fmt.Sprintf("Snapshot status update failed, %v", err))
+		snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 		return err
 	}
 	return nil

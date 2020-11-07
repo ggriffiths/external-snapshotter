@@ -39,7 +39,7 @@ const (
 	latencyReconciliationMetricName    = "reconciliation_total_seconds"
 	latencyReconciliationMetricHelpMsg = "Number of seconds spent by the controller on intermediate reconciliations"
 	latencyOperationMetricName         = "operation_total_seconds"
-	latencyOperationMetricHelpMsg      = "Total number of seconds spent by the controller on an operation"
+	latencyOperationMetricHelpMsg      = "Total number of seconds spent by the controller on an operation from end to end"
 
 	// CreateSnapshotOperationName is the operation that tracks how long the controller takes to create a snapshot.
 	// Specifically, the operation metric is emitted based on the following timestamps:
@@ -65,6 +65,7 @@ const (
 	PreProvisionedSnapshotType = snapshotProvisionType("pre-provisioned")
 
 	SnapshotStatusTypeUnknown            = snapshotStatusType("unknown")
+	SnapshotStatusTypeInProgress         = snapshotStatusType("in-progress")
 	SnapshotStatusTypeSuccess            = snapshotStatusType("success")
 	SnapshotStatusTypeInvalidRequest     = snapshotStatusType("invalid-request")
 	SnapshotStatusTypeControllerError    = snapshotStatusType("controller-error")
