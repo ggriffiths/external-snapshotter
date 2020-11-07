@@ -64,13 +64,21 @@ const (
 	// PreProvisionedSnapshotType represents a snapshot that is pre-provisioned
 	PreProvisionedSnapshotType = snapshotProvisionType("pre-provisioned")
 
+	// The following metrics are used for the individual reconciliation metrics.
 	SnapshotStatusTypeUnknown            = snapshotStatusType("unknown")
 	SnapshotStatusTypeInProgress         = snapshotStatusType("in-progress")
-	SnapshotStatusTypeSuccess            = snapshotStatusType("success")
 	SnapshotStatusTypeInvalidRequest     = snapshotStatusType("invalid-request")
 	SnapshotStatusTypeControllerError    = snapshotStatusType("controller-error")
 	SnapshotStatusTypeStorageSystemError = snapshotStatusType("storage-system-error")
-	SnapshotStatusTypeCancel             = snapshotStatusType("cancel")
+
+	// Success and Cancel are statuses for e2e operation time (operation_total_seconds)
+	// SnapshotStatusTypeSuccess represents that a CreateSnapshot, CreateSnapshotAndReady,
+	// or DeleteSnapshot has finished successfully.
+	// Individual reconciliations (reconciliation_total_seconds) also use this status.
+	SnapshotStatusTypeSuccess = snapshotStatusType("success")
+	// SnapshotStatusTypeCancel represents that a CreateSnapshot, CreateSnapshotAndReady,
+	// or DeleteSnapshot has been deleted before finishing.
+	SnapshotStatusTypeCancel = snapshotStatusType("cancel")
 )
 
 // OperationStatus is the interface type for representing an operation's execution
@@ -196,6 +204,11 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 	// record total operation durations if operation is successful
 	if strStatus == string(SnapshotStatusTypeSuccess) {
 		switch op.Name {
+		case CreateSnapshotOperationName:
+			// time since user first created volumesnapshot until a volumesnapshot.Status.CreationTime is aded
+			operationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
+			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
+
 		case CreateSnapshotAndReadyOperationName:
 			// time since user first created volumesnapshot until ReadyToUse is true
 			operationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
