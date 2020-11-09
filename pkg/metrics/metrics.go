@@ -215,7 +215,22 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
 
 		case DeleteSnapshotOperationName:
-			// check if this is a cancellation. It is a cancellation if the snapshot deletion finished without a status set
+			// Check if this is a CreateSnapshot cancellation. It is a cancellation if the snapshot deletion finished without a status set
+			// or there is a status with CreationTime as nil.
+			if snapshot.Status == nil || (snapshot.Status.CreationTime == nil) {
+				// get duration from creation time to delete/cancellation
+				cancelOperationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
+
+				// emit this metric as a custom cancellation
+				opMgr.opRequestLatencyMetrics.WithLabelValues(
+					op.Driver,
+					CreateSnapshotOperationName,
+					op.SnapshotType,
+					string(SnapshotStatusTypeCancel),
+				).Observe(cancelOperationDuration)
+			}
+
+			// Check if this is a CreateSnapshotAndReadyOperationName cancellation. It is a cancellation if the snapshot deletion finished without a status set
 			// or there is a status set with ReadyToUse set to false.
 			if snapshot.Status == nil || (snapshot.Status.ReadyToUse != nil && !(*snapshot.Status.ReadyToUse)) {
 				// get duration from creation time to delete/cancellation
