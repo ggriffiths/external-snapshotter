@@ -40,6 +40,7 @@ const (
 	latencyReconciliationMetricHelpMsg = "Number of seconds spent by the controller on intermediate reconciliations"
 	latencyOperationMetricName         = "operation_total_seconds"
 	latencyOperationMetricHelpMsg      = "Total number of seconds spent by the controller on an operation from end to end"
+	unknownDriverName                  = "unknown"
 
 	// CreateSnapshotOperationName is the operation that tracks how long the controller takes to create a snapshot.
 	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
@@ -132,6 +133,10 @@ func NewOperation(name, driver string, snapshot *crdv1.VolumeSnapshot) Operation
 	snapshotProvisionType := DynamicSnapshotType
 	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
 		snapshotProvisionType = PreProvisionedSnapshotType
+	}
+
+	if driver == "" {
+		driver = unknownDriverName
 	}
 
 	return Operation{

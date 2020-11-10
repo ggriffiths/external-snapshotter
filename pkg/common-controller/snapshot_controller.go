@@ -436,6 +436,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			snapshotStatusType = metrics.SnapshotStatusTypeInvalidRequest
 			return err
 		}
+
 		// if no content found yet, update status and return
 		if content == nil {
 			// can not find the desired VolumeSnapshotContent from cache store
@@ -464,7 +465,6 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			return err
 		}
 
-		snapshotStatusType = metrics.SnapshotStatusTypeSuccess
 		return nil
 	}
 
@@ -614,7 +614,6 @@ func (ctrl *csiSnapshotCommonController) getDynamicallyProvisionedContentFromSto
 	}
 	if content == nil {
 		// no matching content with the desired name has been found in cache
-		ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeInvalidRequest), snapshot)
 		return nil, nil
 	}
 	// check whether the content represents a dynamically provisioned snapshot
