@@ -101,10 +101,6 @@ type MetricsManager interface {
 	// if the operation already exists, it's an no-op.
 	OperationStart(op Operation)
 
-	// UpdateOperationDriver takes in an operation and updates the cache
-	// with a newly discovered driverName, without leaving the old cache record
-	UpdateOperationDriver(op Operation, driver string)
-
 	// DropOperation removes an operation from cache.
 	// if the operation does not exist, it's an no-op.
 	DropOperation(op Operation)
