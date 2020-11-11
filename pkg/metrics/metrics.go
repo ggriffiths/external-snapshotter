@@ -25,6 +25,7 @@ import (
 
 	crdv1 "github.com/kubernetes-csi/external-snapshotter/client/v3/apis/volumesnapshot/v1beta1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/apimachinery/pkg/types"
 	k8smetrics "k8s.io/component-base/metrics"
 	klog "k8s.io/klog/v2"
 )
@@ -125,7 +126,7 @@ type Operation struct {
 	// Driver is the driver name which executes the operation
 	Driver string
 	// ResourceID is the resource UID to which the operation has been executed against
-	ResourceID string
+	ResourceID types.UID
 	// SnapshotType represents the snapshot type, for example: "dynamic", "pre-provisioned"
 	SnapshotType string
 }
@@ -144,7 +145,7 @@ func NewOperation(name, driver string, snapshot *crdv1.VolumeSnapshot) Operation
 	return Operation{
 		Name:         name,
 		Driver:       driver,
-		ResourceID:   string(snapshot.UID),
+		ResourceID:   snapshot.UID,
 		SnapshotType: string(snapshotProvisionType),
 	}
 }

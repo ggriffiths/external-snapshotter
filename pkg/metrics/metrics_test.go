@@ -34,6 +34,7 @@ import (
 	cmg "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var (
@@ -92,7 +93,7 @@ func TestDropNonExistingOperation(t *testing.T) {
 	op := Operation{
 		Name:       "drop-non-existing-operation-should-be-noop",
 		Driver:     "driver",
-		ResourceID: "uid",
+		ResourceID: types.UID("uid"),
 	}
 	mgr.DropOperation(op)
 }
@@ -104,7 +105,7 @@ func TestRecordMetricsForNonExistingOperation(t *testing.T) {
 	op := Operation{
 		Name:       "no-metrics-should-be-recorded-as-operation-did-not-start",
 		Driver:     "driver",
-		ResourceID: "uid",
+		ResourceID: types.UID("uid"),
 	}
 	mgr.RecordMetrics(op, nil, &v1beta1.VolumeSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
@@ -131,7 +132,7 @@ func TestDropOperation(t *testing.T) {
 	op := Operation{
 		Name:       "should-have-been-dropped",
 		Driver:     "driver",
-		ResourceID: "uid",
+		ResourceID: types.UID("uid"),
 	}
 	mgr.OperationStart(op)
 	mgr.DropOperation(op)
@@ -192,7 +193,7 @@ func TestUnknownStatus(t *testing.T) {
 	op := Operation{
 		Name:       "unknown-status-operation",
 		Driver:     "driver",
-		ResourceID: "uid",
+		ResourceID: types.UID("uid"),
 	}
 	mgr.OperationStart(op)
 	// should create a Unknown data point with latency ~300ms
@@ -236,7 +237,7 @@ func TestRecordMetrics(t *testing.T) {
 	op := Operation{
 		Name:       "op1",
 		Driver:     "driver1",
-		ResourceID: "uid1",
+		ResourceID: types.UID("uid1"),
 	}
 	mgr.OperationStart(op)
 	// should create a Success data point with latency ~ 1100ms
@@ -253,7 +254,7 @@ func TestRecordMetrics(t *testing.T) {
 	// add another operation metric
 	op.Name = "op2"
 	op.Driver = "driver2"
-	op.ResourceID = "uid2"
+	op.ResourceID = types.UID("uid2")
 	mgr.OperationStart(op)
 	// should create a Failure data point with latency ~ 100ms
 	time.Sleep(100 * time.Millisecond)
@@ -327,7 +328,7 @@ func TestConcurrency(t *testing.T) {
 			Operation{
 				Name:       "success1",
 				Driver:     "driver1",
-				ResourceID: "uid1",
+				ResourceID: types.UID("uid1"),
 			},
 			100,
 			success,
@@ -337,7 +338,7 @@ func TestConcurrency(t *testing.T) {
 			Operation{
 				Name:       "success2",
 				Driver:     "driver2",
-				ResourceID: "uid2",
+				ResourceID: types.UID("uid2"),
 			},
 			100,
 			success,
@@ -347,7 +348,7 @@ func TestConcurrency(t *testing.T) {
 			Operation{
 				Name:       "failure1",
 				Driver:     "driver3",
-				ResourceID: "uid3",
+				ResourceID: types.UID("uid3"),
 			},
 			100,
 			failure,
@@ -357,7 +358,7 @@ func TestConcurrency(t *testing.T) {
 			Operation{
 				Name:       "failure2",
 				Driver:     "driver4",
-				ResourceID: "uid4",
+				ResourceID: types.UID("uid4"),
 			},
 			100,
 			failure,
@@ -367,7 +368,7 @@ func TestConcurrency(t *testing.T) {
 			Operation{
 				Name:       "unknown",
 				Driver:     "driver5",
-				ResourceID: "uid5",
+				ResourceID: types.UID("uid5"),
 			},
 			100,
 			nil,
@@ -377,7 +378,7 @@ func TestConcurrency(t *testing.T) {
 			Operation{
 				Name:       "drop-from-cache",
 				Driver:     "driver6",
-				ResourceID: "uid6",
+				ResourceID: types.UID("uid6"),
 			},
 			100,
 			nil,
@@ -392,7 +393,7 @@ func TestConcurrency(t *testing.T) {
 	remaining := Operation{
 		Name:       "remaining-in-cache",
 		Driver:     "driver7",
-		ResourceID: "uid7",
+		ResourceID: types.UID("uid7"),
 	}
 	mgr.OperationStart(remaining)
 
