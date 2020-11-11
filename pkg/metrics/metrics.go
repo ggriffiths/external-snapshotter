@@ -25,7 +25,6 @@ import (
 
 	crdv1 "github.com/kubernetes-csi/external-snapshotter/client/v3/apis/volumesnapshot/v1beta1"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/apimachinery/pkg/types"
 	k8smetrics "k8s.io/component-base/metrics"
 	klog "k8s.io/klog/v2"
 )
@@ -101,6 +100,10 @@ type MetricsManager interface {
 	// if the operation already exists, it's an no-op.
 	OperationStart(op Operation)
 
+	// UpdateOperationDriver takes in an operation and updates the cache
+	// with a newly discovered driverName, without leaving the old cache record
+	UpdateOperationDriver(op Operation, driver string)
+
 	// DropOperation removes an operation from cache.
 	// if the operation does not exist, it's an no-op.
 	DropOperation(op Operation)
@@ -122,7 +125,7 @@ type Operation struct {
 	// Driver is the driver name which executes the operation
 	Driver string
 	// ResourceID is the resource UID to which the operation has been executed against
-	ResourceID types.UID
+	ResourceID string
 	// SnapshotType represents the snapshot type, for example: "dynamic", "pre-provisioned"
 	SnapshotType string
 }
@@ -141,7 +144,7 @@ func NewOperation(name, driver string, snapshot *crdv1.VolumeSnapshot) Operation
 	return Operation{
 		Name:         name,
 		Driver:       driver,
-		ResourceID:   snapshot.UID,
+		ResourceID:   string(snapshot.UID),
 		SnapshotType: string(snapshotProvisionType),
 	}
 }
@@ -172,6 +175,22 @@ func NewMetricsManager() MetricsManager {
 // OperationStart starts a new operation
 func (opMgr *operationMetricsManager) OperationStart(op Operation) {
 	opMgr.cache.LoadOrStore(op, time.Now())
+}
+
+// OperationStart starts a new operation
+func (opMgr *operationMetricsManager) UpdateOperationDriver(op Operation, driver string) {
+	// get ts from existing cache record
+	existingTs, ok := opMgr.cache.Load(op)
+	if !ok {
+		return
+	}
+
+	// delete old cache record
+	opMgr.cache.Delete(op)
+
+	// update op in cache to have new driver
+	op.Driver = driver
+	opMgr.cache.Store(op, existingTs)
 }
 
 // OperationStart drops an operation

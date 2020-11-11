@@ -446,6 +446,12 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 			snapshotStatusType = metrics.SnapshotStatusTypeControllerError
 			return fmt.Errorf("snapshot %s requests an non-existing content %s", utils.SnapshotKey(snapshot), *snapshot.Spec.Source.VolumeSnapshotContentName)
 		}
+		// update operation with driver if found in content
+		if driverName == "" && content.Spec.Driver != "" {
+			driverName = content.Spec.Driver
+			ctrl.metricsManager.UpdateOperationDriver(createAndReadyOperation, driverName)
+		}
+
 		// Set VolumeSnapshotRef UID
 		newContent, err := ctrl.checkandBindSnapshotContent(snapshot, content)
 		if err != nil {
