@@ -1209,9 +1209,9 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 		}
 
 		// Must meet the following criteria to emit a successful CreateSnapshotAndReady status
-		// 1. Previous status was nil OR Previous status had a nil ReadyToUse
+		// 1. Previous status was nil OR Previous status had a nil ReadyToUse OR Previous status had a false ReadyToUse
 		// 2. New status must be non-nil with a ReadyToUse as true
-		if (snapshotObj.Status == nil || (snapshotObj.Status != nil && snapshotObj.Status.ReadyToUse == nil)) &&
+		if (snapshotObj.Status == nil || (snapshotObj.Status.ReadyToUse == nil || !*snapshotObj.Status.ReadyToUse)) &&
 			(newStatus != nil && newStatus.ReadyToUse != nil && *newStatus.ReadyToUse) {
 			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), newSnapshotObj)
 		}
