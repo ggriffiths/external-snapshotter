@@ -43,19 +43,19 @@ const (
 	unknownDriverName                  = "unknown"
 
 	// CreateSnapshotOperationName is the operation that tracks how long the controller takes to create a snapshot.
-	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
+	// Specifically, the operation metric is emitted based on the following timestamps:
 	// - Start_time: controller notices the first time that there is a new VolumeSnapshot CR to dynamically provision a snapshot
 	// - End_time:   controller notices that the CR has a status with CreationTime field set to be non-nil OR an error occurs first
 	CreateSnapshotOperationName = "CreateSnapshot"
 
 	// CreateSnapshotAndReadyOperationName is the operation that tracks how long the controller takes to create a snapshot and for it to be ready.
-	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
+	// Specifically, the operation metric is emitted based on the following timestamps:
 	// - Start_time: controller notices the first time that there is a new VolumeSnapshot CR(both dynamic and pre-provisioned cases)
 	// - End_time:   controller notices that the CR has a status with Ready field set to be true OR an error occurs first
 	CreateSnapshotAndReadyOperationName = "CreateSnapshotAndReady"
 
 	// DeleteSnapshotOperationName is the operation that tracks how long a snapshot deletion takes.
-	// Specifically, the operation metric is emitted based on the following timestamps for e2e metrics (operation_total_seconds):
+	// Specifically, the operation metric is emitted based on the following timestamps:
 	// - Start_time: controller notices the first time that there is a deletion timestamp placed on the VolumeSnapshot CR and the CR is ready to be deleted. Note that if the CR is being used by a PVC for rehydration, the controller should *NOT* set the start_time.
 	// - End_time: controller removed all finalizers on the VolumeSnapshot CR such that the CR is ready to be removed in the API server.
 	DeleteSnapshotOperationName = "DeleteSnapshot"
@@ -65,21 +65,20 @@ const (
 	// PreProvisionedSnapshotType represents a snapshot that is pre-provisioned
 	PreProvisionedSnapshotType = snapshotProvisionType("pre-provisioned")
 
-	// The following metrics are used for the individual reconciliation metrics.
-	SnapshotStatusTypeUnknown            = snapshotStatusType("unknown")
-	SnapshotStatusTypeInProgress         = snapshotStatusType("in-progress")
-	SnapshotStatusTypeInvalidRequest     = snapshotStatusType("invalid-request")
-	SnapshotStatusTypeControllerError    = snapshotStatusType("controller-error")
-	SnapshotStatusTypeStorageSystemError = snapshotStatusType("storage-system-error")
+	SnapshotStatusTypeUnknown            snapshotStatusType = "unknown"
+	SnapshotStatusTypeInProgress         snapshotStatusType = "in-progress"
+	SnapshotStatusTypeInvalidRequest     snapshotStatusType = "invalid-request"
+	SnapshotStatusTypeControllerError    snapshotStatusType = "controller-error"
+	SnapshotStatusTypeStorageSystemError snapshotStatusType = "storage-system-error"
 
-	// Success and Cancel are statuses for e2e operation time (operation_total_seconds)
+	// Success and Cancel are statuses for operation time (operation_total_seconds) as seen by snapshot controller
 	// SnapshotStatusTypeSuccess represents that a CreateSnapshot, CreateSnapshotAndReady,
 	// or DeleteSnapshot has finished successfully.
 	// Individual reconciliations (reconciliation_total_seconds) also use this status.
-	SnapshotStatusTypeSuccess = snapshotStatusType("success")
+	SnapshotStatusTypeSuccess snapshotStatusType = "success"
 	// SnapshotStatusTypeCancel represents that a CreateSnapshot, CreateSnapshotAndReady,
 	// or DeleteSnapshot has been deleted before finishing.
-	SnapshotStatusTypeCancel = snapshotStatusType("cancel")
+	SnapshotStatusTypeCancel snapshotStatusType = "cancel"
 )
 
 // OperationStatus is the interface type for representing an operation's execution
@@ -157,10 +156,7 @@ type operationMetricsManager struct {
 	// registry is a wrapper around Prometheus Registry
 	registry k8smetrics.KubeRegistry
 
-	// opReconciliationLatencyMetrics is a Histogram metric for invidual reconciliation metrics
-	opReconciliationLatencyMetrics *k8smetrics.HistogramVec
-
-	// opRequestLatencyMetrics is a Histogram metrics for e2e operation time per request
+	// opRequestLatencyMetrics is a Histogram metrics for operation time per request
 	opRequestLatencyMetrics *k8smetrics.HistogramVec
 }
 
@@ -202,58 +198,37 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 		strStatus = status.String()
 	}
 
-	// record invidual reconciliation time
-	reconciliationDuration := time.Since(ts).Seconds()
-	opMgr.opReconciliationLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(reconciliationDuration)
+	operationDuration := time.Since(ts).Seconds()
+	opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
 
-	// record total operation durations if operation is successful
-	if strStatus == string(SnapshotStatusTypeSuccess) {
-		switch op.Name {
-		case CreateSnapshotOperationName:
-			// time since user first created volumesnapshot until a volumesnapshot.Status.CreationTime is aded
-			operationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
-			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
+	// Report cancel metrics if we are deleting an unfinished VolumeSnapshot
+	if op.Name == DeleteSnapshotOperationName && strStatus == string(SnapshotStatusTypeSuccess) {
+		// Check if this is a CreateSnapshot cancellation. It is a cancellation if the snapshot deletion finished without a status set
+		// or there is a status with CreationTime as nil.
+		if snapshot.Status == nil || (snapshot.Status.CreationTime == nil) {
+			cancelOperationDuration := time.Since(ts).Seconds()
 
-		case CreateSnapshotAndReadyOperationName:
-			// time since user first created volumesnapshot until ReadyToUse is true
-			operationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
-			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
+			// emit this metric as a custom cancellation
+			opMgr.opRequestLatencyMetrics.WithLabelValues(
+				op.Driver,
+				CreateSnapshotOperationName,
+				op.SnapshotType,
+				string(SnapshotStatusTypeCancel),
+			).Observe(cancelOperationDuration)
+		}
 
-		case DeleteSnapshotOperationName:
-			// Check if this is a CreateSnapshot cancellation. It is a cancellation if the snapshot deletion finished without a status set
-			// or there is a status with CreationTime as nil.
-			if snapshot.Status == nil || (snapshot.Status.CreationTime == nil) {
-				// get duration from creation time to delete/cancellation
-				cancelOperationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
+		// Check if this is a CreateSnapshotAndReadyOperationName cancellation. It is a cancellation if the snapshot deletion finished without a status set
+		// or there is a status set with ReadyToUse set to false.
+		if snapshot.Status == nil || (snapshot.Status.ReadyToUse != nil && !(*snapshot.Status.ReadyToUse)) {
+			cancelOperationDuration := time.Since(ts).Seconds()
 
-				// emit this metric as a custom cancellation
-				opMgr.opRequestLatencyMetrics.WithLabelValues(
-					op.Driver,
-					CreateSnapshotOperationName,
-					op.SnapshotType,
-					string(SnapshotStatusTypeCancel),
-				).Observe(cancelOperationDuration)
-			}
-
-			// Check if this is a CreateSnapshotAndReadyOperationName cancellation. It is a cancellation if the snapshot deletion finished without a status set
-			// or there is a status set with ReadyToUse set to false.
-			if snapshot.Status == nil || (snapshot.Status.ReadyToUse != nil && !(*snapshot.Status.ReadyToUse)) {
-				// get duration from creation time to delete/cancellation
-				cancelOperationDuration := time.Since(snapshot.CreationTimestamp.Time).Seconds()
-
-				// emit this metric as a custom cancellation
-				opMgr.opRequestLatencyMetrics.WithLabelValues(
-					op.Driver,
-					CreateSnapshotAndReadyOperationName,
-					op.SnapshotType,
-					string(SnapshotStatusTypeCancel),
-				).Observe(cancelOperationDuration)
-			}
-
-			// Still emit the delete operation, as we are both deleting the snapshot and cancelling it's creation.
-			// For this duration, we use the time since user marked volumesnapshot for deletion.
-			operationDuration := time.Since(snapshot.DeletionTimestamp.Time).Seconds()
-			opMgr.opRequestLatencyMetrics.WithLabelValues(op.Driver, op.Name, op.SnapshotType, strStatus).Observe(operationDuration)
+			// emit this metric as a custom cancellation
+			opMgr.opRequestLatencyMetrics.WithLabelValues(
+				op.Driver,
+				CreateSnapshotAndReadyOperationName,
+				op.SnapshotType,
+				string(SnapshotStatusTypeCancel),
+			).Observe(cancelOperationDuration)
 		}
 	}
 
@@ -262,15 +237,6 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 
 func (opMgr *operationMetricsManager) init() {
 	opMgr.registry = k8smetrics.NewKubeRegistry()
-	opMgr.opReconciliationLatencyMetrics = k8smetrics.NewHistogramVec(
-		&k8smetrics.HistogramOpts{
-			Subsystem: subSystem,
-			Name:      latencyReconciliationMetricName,
-			Help:      latencyReconciliationMetricHelpMsg,
-			Buckets:   metricBuckets,
-		},
-		[]string{labelDriverName, labelOperationName, labelSnapshotType, labelOperationStatus},
-	)
 	opMgr.opRequestLatencyMetrics = k8smetrics.NewHistogramVec(
 		&k8smetrics.HistogramOpts{
 			Subsystem: subSystem,
@@ -280,7 +246,6 @@ func (opMgr *operationMetricsManager) init() {
 		},
 		[]string{labelDriverName, labelOperationName, labelSnapshotType, labelOperationStatus},
 	)
-	opMgr.registry.MustRegister(opMgr.opReconciliationLatencyMetrics)
 	opMgr.registry.MustRegister(opMgr.opRequestLatencyMetrics)
 }
 
@@ -319,16 +284,16 @@ type snapshotStatusType string
 
 // SnapshotOperationStatus represents the status for a snapshot controller operation
 type SnapshotOperationStatus struct {
-	statusCode snapshotStatusType
+	status snapshotStatusType
 }
 
 // NewSnapshotOperationStatus returns a new SnapshotOperationStatus
-func NewSnapshotOperationStatus(statusCode snapshotStatusType) SnapshotOperationStatus {
+func NewSnapshotOperationStatus(status snapshotStatusType) SnapshotOperationStatus {
 	return SnapshotOperationStatus{
-		statusCode: statusCode,
+		status: status,
 	}
 }
 
 func (sos SnapshotOperationStatus) String() string {
-	return string(sos.statusCode)
+	return string(sos.status)
 }

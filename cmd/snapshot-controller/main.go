@@ -51,8 +51,8 @@ var (
 	leaderElection          = flag.Bool("leader-election", false, "Enables leader election.")
 	leaderElectionNamespace = flag.String("leader-election-namespace", "", "The namespace where the leader election resource exists. Defaults to the pod namespace if not set.")
 
-	metricsAddress = flag.String("http-endpoint", "", "The TCP network address where the prometheus metrics endpoint will listen (example: `:8080`). The default is empty string, which means metrics endpoint is disabled.")
-	metricsPath    = flag.String("metrics-path", "/metrics", "The HTTP path where prometheus metrics will be exposed. Default is `/metrics`.")
+	httpEndpoint = flag.String("http-endpoint", "", "The TCP network address where the http server will listen (example: `:8080`). The default is empty string, which means the http endpoint is disabled.")
+	metricsPath  = flag.String("metrics-path", "/metrics", "The HTTP path where prometheus metrics will be exposed. Default is `/metrics`.")
 )
 
 var (
@@ -96,10 +96,10 @@ func main() {
 	metricsManager := metrics.NewMetricsManager()
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
-	if *metricsAddress != "" {
-		srv, err := metricsManager.StartMetricsEndpoint(*metricsPath, *metricsAddress, promklog{}, wg)
+	if *httpEndpoint != "" {
+		srv, err := metricsManager.StartMetricsEndpoint(*metricsPath, *httpEndpoint, promklog{}, wg)
 		if err != nil {
-			klog.Errorf("Failed to start metrics: %s", err.Error())
+			klog.Errorf("Failed to start metrics server: %s", err.Error())
 			os.Exit(1)
 		}
 		defer func() {
@@ -107,9 +107,11 @@ func main() {
 			if err != nil {
 				klog.Errorf("Failed to shutdown metrics server: %s", err.Error())
 			}
+
+			klog.Infof("Metrics server successfully shutdown")
 			wg.Done()
 		}()
-		klog.Infof("Metrics successfully started on %s, %s", *metricsAddress, *metricsPath)
+		klog.Infof("Metrics server successfully started on %s, %s", *httpEndpoint, *metricsPath)
 	}
 
 	// Add Snapshot types to the default Kubernetes so events can be logged for them
