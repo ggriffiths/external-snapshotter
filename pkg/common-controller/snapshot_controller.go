@@ -423,14 +423,21 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	}
 	snapshotStatusType := metrics.SnapshotStatusTypeInProgress
 
+	// Start metrics operations
+	createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
+	ctrl.metricsManager.OperationStart(createOperation)
+	defer func() {
+		ctrl.metricsManager.RecordMetrics(createOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
+	}()
+
+	createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
+	ctrl.metricsManager.OperationStart(createAndReadyOperation)
+	defer func() {
+		ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
+	}()
+
 	// Pre-provisioned snapshot
 	if snapshot.Spec.Source.VolumeSnapshotContentName != nil {
-		createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
-		ctrl.metricsManager.OperationStart(createAndReadyOperation)
-		defer func() {
-			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
-		}()
-
 		content, err := ctrl.getPreprovisionedContentFromStore(snapshot)
 		if err != nil {
 			snapshotStatusType = metrics.SnapshotStatusTypeInvalidRequest
@@ -449,6 +456,7 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 		// update operation with driver if found in content
 		if driverName == "" && content.Spec.Driver != "" {
 			driverName = content.Spec.Driver
+			ctrl.metricsManager.UpdateOperationDriver(createOperation, driverName)
 			ctrl.metricsManager.UpdateOperationDriver(createAndReadyOperation, driverName)
 		}
 
@@ -475,18 +483,6 @@ func (ctrl *csiSnapshotCommonController) syncUnreadySnapshot(snapshot *crdv1.Vol
 	}
 
 	// snapshot.Spec.Source.VolumeSnapshotContentName == nil - dynamically creating snapshot
-	createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
-	ctrl.metricsManager.OperationStart(createOperation)
-	defer func() {
-		ctrl.metricsManager.RecordMetrics(createOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
-	}()
-
-	createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
-	ctrl.metricsManager.OperationStart(createAndReadyOperation)
-	defer func() {
-		ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(snapshotStatusType), snapshot)
-	}()
-
 	klog.V(5).Infof("getDynamicallyProvisionedContentFromStore for snapshot %s", uniqueSnapshotName)
 	contentObj, err := ctrl.getDynamicallyProvisionedContentFromStore(snapshot)
 	if err != nil {
@@ -1192,10 +1188,7 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 	}
 
 	if updated {
-		driverName, err := ctrl.getSnapshotDriverName(snapshot)
-		if err != nil {
-			return nil, fmt.Errorf("failed to getSnapshotDriverName while recording metrics for snapshot %q: %s", utils.SnapshotKey(snapshot), err)
-		}
+		driverName := content.Spec.Driver
 		createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
 		createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
 
