@@ -31,16 +31,14 @@ import (
 )
 
 const (
-	labelDriverName                    = "driver_name"
-	labelOperationName                 = "operation_name"
-	labelOperationStatus               = "operation_status"
-	labelSnapshotType                  = "snapshot_type"
-	subSystem                          = "snapshot_controller"
-	latencyReconciliationMetricName    = "reconciliation_total_seconds"
-	latencyReconciliationMetricHelpMsg = "Number of seconds spent by the controller on intermediate reconciliations"
-	latencyOperationMetricName         = "operation_total_seconds"
-	latencyOperationMetricHelpMsg      = "Total number of seconds spent by the controller on an operation from end to end"
-	unknownDriverName                  = "unknown"
+	labelDriverName               = "driver_name"
+	labelOperationName            = "operation_name"
+	labelOperationStatus          = "operation_status"
+	labelSnapshotType             = "snapshot_type"
+	subSystem                     = "snapshot_controller"
+	latencyOperationMetricName    = "operation_total_seconds"
+	latencyOperationMetricHelpMsg = "Total number of seconds spent by the controller on an operation"
+	unknownDriverName             = "unknown"
 
 	// CreateSnapshotOperationName is the operation that tracks how long the controller takes to create a snapshot.
 	// Specifically, the operation metric is emitted based on the following timestamps:
