@@ -1125,11 +1125,8 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 	if updated {
 		snapshotClone := snapshotObj.DeepCopy()
 		snapshotClone.Status = newStatus
-		newSnapshotObj, err := ctrl.clientset.SnapshotV1beta1().VolumeSnapshots(snapshotClone.Namespace).UpdateStatus(context.TODO(), snapshotClone, metav1.UpdateOptions{})
-		if err != nil {
-			return nil, newControllerUpdateError(utils.SnapshotKey(snapshot), err.Error())
-		}
 
+		// We need to record metrics before updating the status due to a bug causing cache entries after a failed UpdateStatus call.
 		// Must meet the following criteria to emit a successful CreateSnapshot status
 		// 1. Previous status was nil OR Previous status had a nil CreationTime
 		// 2. New status must be non-nil with a non-nil CreationTime
@@ -1147,6 +1144,11 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 			(newStatus != nil && newStatus.ReadyToUse != nil && *newStatus.ReadyToUse) {
 			createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
 			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), snapshotObj)
+		}
+
+		newSnapshotObj, err := ctrl.clientset.SnapshotV1beta1().VolumeSnapshots(snapshotClone.Namespace).UpdateStatus(context.TODO(), snapshotClone, metav1.UpdateOptions{})
+		if err != nil {
+			return nil, newControllerUpdateError(utils.SnapshotKey(snapshot), err.Error())
 		}
 
 		return newSnapshotObj, nil
