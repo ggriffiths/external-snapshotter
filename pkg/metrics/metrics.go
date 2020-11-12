@@ -246,11 +246,7 @@ func (opMgr *operationMetricsManager) RecordMetrics(op Operation, status Operati
 		}
 	}
 
-	// Only clear from cache on a successful snapshot, otherwise keep
-	// reusing to get correct timestamp
-	if strStatus == string(SnapshotStatusTypeSuccess) {
-		opMgr.cache.Delete(op)
-	}
+	opMgr.cache.Delete(op)
 }
 
 func (opMgr *operationMetricsManager) init() {

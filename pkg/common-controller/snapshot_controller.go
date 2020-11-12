@@ -1123,10 +1123,6 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 	}
 
 	if updated {
-		driverName := content.Spec.Driver
-		createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
-		createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
-
 		snapshotClone := snapshotObj.DeepCopy()
 		snapshotClone.Status = newStatus
 		newSnapshotObj, err := ctrl.clientset.SnapshotV1beta1().VolumeSnapshots(snapshotClone.Namespace).UpdateStatus(context.TODO(), snapshotClone, metav1.UpdateOptions{})
@@ -1137,9 +1133,11 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 		// Must meet the following criteria to emit a successful CreateSnapshot status
 		// 1. Previous status was nil OR Previous status had a nil CreationTime
 		// 2. New status must be non-nil with a non-nil CreationTime
+		driverName := content.Spec.Driver
 		if (snapshotObj.Status == nil || (snapshotObj.Status != nil && snapshotObj.Status.CreationTime == nil)) &&
 			(newStatus != nil && newStatus.CreationTime != nil) {
-			ctrl.metricsManager.RecordMetrics(createOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), newSnapshotObj)
+			createOperation := metrics.NewOperation(metrics.CreateSnapshotOperationName, driverName, snapshot)
+			ctrl.metricsManager.RecordMetrics(createOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), snapshotObj)
 		}
 
 		// Must meet the following criteria to emit a successful CreateSnapshotAndReady status
@@ -1147,7 +1145,8 @@ func (ctrl *csiSnapshotCommonController) updateSnapshotStatus(snapshot *crdv1.Vo
 		// 2. New status must be non-nil with a ReadyToUse as true
 		if (snapshotObj.Status == nil || (snapshotObj.Status.ReadyToUse == nil || !*snapshotObj.Status.ReadyToUse)) &&
 			(newStatus != nil && newStatus.ReadyToUse != nil && *newStatus.ReadyToUse) {
-			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), newSnapshotObj)
+			createAndReadyOperation := metrics.NewOperation(metrics.CreateSnapshotAndReadyOperationName, driverName, snapshot)
+			ctrl.metricsManager.RecordMetrics(createAndReadyOperation, metrics.NewSnapshotOperationStatus(metrics.SnapshotStatusTypeSuccess), snapshotObj)
 		}
 
 		return newSnapshotObj, nil
