@@ -15,6 +15,7 @@ package sidecar_controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -38,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -171,6 +173,50 @@ func (r *snapshotReactor) React(action core.Action) (handled bool, ret runtime.O
 
 	// Test did not request to inject an error, continue simulating API server.
 	switch {
+
+	case action.Matches("patch", "volumesnapshotcontents"):
+		content := &crdv1.VolumeSnapshotContent{}
+		action := action.(core.PatchAction)
+
+		// Check and bump object version
+		storedSnapshotContent, found := r.contents[action.GetName()]
+		if found {
+			// Apply patch
+			storedSnapshotBytes, err := json.Marshal(storedSnapshotContent)
+			if err != nil {
+				return true, nil, err
+			}
+
+			mergedBytes, err := strategicpatch.StrategicMergePatch(storedSnapshotBytes, action.GetPatch(), content)
+			if err != nil {
+				return true, nil, err
+			}
+			if err = json.Unmarshal(mergedBytes, content); err != nil {
+				return true, nil, err
+			}
+
+			storedVer, _ := strconv.Atoi(storedSnapshotContent.ResourceVersion)
+
+			// Don't modify the existing object
+			content = content.DeepCopy()
+			content.ResourceVersion = strconv.Itoa(storedVer + 1)
+
+			// If we were updating annotations and the new annotations are nil, leave as empty.
+			// This seems to be the behavior for merge-patching nil & empty annotations
+			if !reflect.DeepEqual(storedSnapshotContent.Annotations, content.Annotations) && content.Annotations == nil {
+				content.Annotations = make(map[string]string)
+			}
+		} else {
+			return true, nil, fmt.Errorf("cannot update snapshot content %s: snapshot content not found", action.GetName())
+		}
+
+		// Store the updated object to appropriate places.
+		r.contents[content.Name] = content
+		r.changedObjects = append(r.changedObjects, content)
+		r.changedSinceLastSync++
+		klog.V(4).Infof("saved updated content %s", content.Name)
+		return true, content, nil
+
 	case action.Matches("create", "volumesnapshotcontents"):
 		obj := action.(core.UpdateAction).GetObject()
 		content := obj.(*crdv1.VolumeSnapshotContent)
@@ -489,6 +535,8 @@ func newSnapshotReactor(kubeClient *kubefake.Clientset, client *fake.Clientset, 
 	client.AddReactor("update", "volumesnapshotcontents", reactor.React)
 	client.AddReactor("get", "volumesnapshotcontents", reactor.React)
 	client.AddReactor("delete", "volumesnapshotcontents", reactor.React)
+	client.AddReactor("patch", "volumesnapshot", reactor.React)
+	client.AddReactor("patch", "volumesnapshotcontents", reactor.React)
 	kubeClient.AddReactor("get", "secrets", reactor.React)
 
 	return reactor
