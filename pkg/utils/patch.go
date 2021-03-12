@@ -20,13 +20,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	patch "github.com/evanphx/json-patch"
 	crdv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 	clientset "github.com/kubernetes-csi/external-snapshotter/client/v4/clientset/versioned"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/strategicpatch"
 )
 
 // PatchVolumeSnapshot patches a volume snapshot object
@@ -41,7 +42,7 @@ func PatchVolumeSnapshot(
 		return nil, err
 	}
 
-	_, err = client.SnapshotV1().VolumeSnapshots(updatedSnapshot.Namespace).Patch(context.TODO(), existingSnapshot.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}, subresources...)
+	_, err = client.SnapshotV1().VolumeSnapshots(updatedSnapshot.Namespace).Patch(context.TODO(), existingSnapshot.Name, types.MergePatchType, patch, metav1.PatchOptions{}, subresources...)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +62,7 @@ func PatchVolumeSnapshotContent(
 		return nil, err
 	}
 
-	_, err = client.SnapshotV1().VolumeSnapshotContents().Patch(context.TODO(), existingSnapshotContent.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}, subresources...)
+	_, err = client.SnapshotV1().VolumeSnapshotContents().Patch(context.TODO(), existingSnapshotContent.Name, types.MergePatchType, patch, metav1.PatchOptions{}, subresources...)
 	if err != nil {
 		return nil, err
 	}
@@ -89,19 +90,19 @@ func addResourceVersion(patchBytes []byte, resourceVersion string) ([]byte, erro
 }
 
 func createSnapshotPatch(snapshot *crdv1.VolumeSnapshot, updatedSnapshot *crdv1.VolumeSnapshot) ([]byte, error) {
-	oldData, err := json.Marshal(snapshot)
+	oldData, err := runtime.Encode(unstructured.UnstructuredJSONScheme, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal old data: %v", err)
 	}
 
-	newData, err := json.Marshal(updatedSnapshot)
+	newData, err := runtime.Encode(unstructured.UnstructuredJSONScheme, updatedSnapshot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal new data: %v", err)
 	}
 
-	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldData, newData, snapshot)
+	patchBytes, err := patch.CreateMergePatch(oldData, newData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create two way merge patch: %v", err)
+		return nil, fmt.Errorf("failed to create merge patch: %v", err)
 	}
 
 	patchBytes, err = addResourceVersion(patchBytes, snapshot.ResourceVersion)
@@ -113,19 +114,19 @@ func createSnapshotPatch(snapshot *crdv1.VolumeSnapshot, updatedSnapshot *crdv1.
 }
 
 func createContentPatch(content *crdv1.VolumeSnapshotContent, updatedContent *crdv1.VolumeSnapshotContent) ([]byte, error) {
-	oldData, err := json.Marshal(content)
+	oldData, err := runtime.Encode(unstructured.UnstructuredJSONScheme, content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal old data: %v", err)
 	}
 
-	newData, err := json.Marshal(updatedContent)
+	newData, err := runtime.Encode(unstructured.UnstructuredJSONScheme, updatedContent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal new data: %v", err)
 	}
 
-	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldData, newData, content)
+	patchBytes, err := patch.CreateMergePatch(oldData, newData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create two way merge patch: %v", err)
+		return nil, fmt.Errorf("failed to create merge patch: %v", err)
 	}
 
 	patchBytes, err = addResourceVersion(patchBytes, content.ResourceVersion)

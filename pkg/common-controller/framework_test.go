@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"reflect"
 	sysruntime "runtime"
 	"strconv"
@@ -29,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	patch "github.com/evanphx/json-patch"
 	crdv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 	clientset "github.com/kubernetes-csi/external-snapshotter/client/v4/clientset/versioned"
 	"github.com/kubernetes-csi/external-snapshotter/client/v4/clientset/versioned/fake"
@@ -43,7 +45,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/diff"
-	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	coreinformers "k8s.io/client-go/informers"
@@ -270,7 +271,7 @@ func (r *snapshotReactor) React(action core.Action) (handled bool, ret runtime.O
 				return true, nil, err
 			}
 
-			mergedBytes, err := strategicpatch.StrategicMergePatch(storedSnapshotBytes, action.GetPatch(), content)
+			mergedBytes, err := patch.MergePatch(storedSnapshotBytes, action.GetPatch())
 			if err != nil {
 				return true, nil, err
 			}
@@ -339,7 +340,7 @@ func (r *snapshotReactor) React(action core.Action) (handled bool, ret runtime.O
 				return true, nil, err
 			}
 
-			mergedBytes, err := strategicpatch.StrategicMergePatch(storedSnapshotBytes, action.GetPatch(), snapshot)
+			mergedBytes, err := patch.MergePatch(storedSnapshotBytes, action.GetPatch())
 			if err != nil {
 				return true, nil, err
 			}
